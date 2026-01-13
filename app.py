@@ -793,12 +793,24 @@ else:
                     y='source',
                     x='count',
                     orientation='h',
-                    title='Top 8 Fonti',
                     color_discrete_sequence=['#6B1AC7']
                 )
                 fig_sources.update_layout(
-                    **PLOTLY_LAYOUT,
-                    yaxis={'categoryorder': 'total ascending'},
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font={'color': 'rgba(255,255,255,0.8)', 'family': 'Inter, sans-serif'},
+                    title={'text': 'Top 8 Fonti', 'font': {'color': 'white', 'size': 16}},
+                    xaxis={
+                        'gridcolor': 'rgba(255,255,255,0.1)',
+                        'linecolor': 'rgba(255,255,255,0.2)',
+                        'tickcolor': 'rgba(255,255,255,0.5)'
+                    },
+                    yaxis={
+                        'categoryorder': 'total ascending',
+                        'gridcolor': 'rgba(255,255,255,0.1)',
+                        'linecolor': 'rgba(255,255,255,0.2)',
+                        'tickcolor': 'rgba(255,255,255,0.5)'
+                    },
                     height=350,
                     showlegend=False
                 )
