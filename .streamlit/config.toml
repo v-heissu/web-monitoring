@@ -7,9 +7,13 @@ enableXsrfProtection = false
 [browser]
 gatherUsageStats = false
 
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
+
 [theme]
-primaryColor = "#667eea"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
+primaryColor = "#6B1AC7"
+backgroundColor = "#0a1628"
+secondaryBackgroundColor = "#162447"
+textColor = "#FFFFFF"
 font = "sans serif"
