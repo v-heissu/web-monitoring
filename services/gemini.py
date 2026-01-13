@@ -18,13 +18,26 @@ class GeminiAnalyzer:
             raise ValueError("GEMINI_API_KEY not configured")
 
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self._model_name = 'gemini-2.0-flash-exp'
+        # Don't hold model in memory - create per batch
+        self.model = None
+
+    def _get_model(self):
+        """Get or create model instance"""
+        if self.model is None:
+            self.model = genai.GenerativeModel(self._model_name)
+        return self.model
+
+    def _release_model(self):
+        """Release model to free memory"""
+        self.model = None
+        gc.collect()
 
     def batch_analyze_articles(
         self,
         articles: List[Dict],
         brand: str,
-        batch_size: int = 5  # Reduced for Railway memory limits
+        batch_size: int = 3  # Reduced from 5 for Railway memory limits
     ) -> List[Dict]:
         """
         Batch analyze articles for sentiment, topics, entities
@@ -58,12 +71,13 @@ Articles to analyze:
 Return ONLY a valid JSON array with {len(batch)} objects, no markdown, no explanation."""
 
             try:
-                response = self.model.generate_content(
+                model = self._get_model()
+                response = model.generate_content(
                     prompt,
                     generation_config={
                         'temperature': 0.3,
                         'top_p': 0.8,
-                        'max_output_tokens': 8000
+                        'max_output_tokens': 2000  # Reduced from 8000 for memory
                     }
                 )
 
@@ -90,6 +104,9 @@ Return ONLY a valid JSON array with {len(batch)} objects, no markdown, no explan
                             'relevance_score': float(result.get('relevance_score', 50))
                         })
 
+                # Explicit cleanup of response objects
+                del response, text, results
+
             except Exception as e:
                 print(f"Gemini analysis error: {e}")
                 # Fallback: neutral analysis
@@ -104,8 +121,8 @@ Return ONLY a valid JSON array with {len(batch)} objects, no markdown, no explan
                         'relevance_score': 50.0
                     })
 
-            # Memory management: free memory after each batch
-            gc.collect()
+            # Memory management: release model and collect garbage after each batch
+            self._release_model()
             time.sleep(0.5)  # Small delay to avoid rate limiting
 
         return analyzed
@@ -154,7 +171,8 @@ Return ONLY valid JSON:
 No markdown, no explanation."""
 
         try:
-            response = self.model.generate_content(prompt)
+            model = self._get_model()
+            response = model.generate_content(prompt)
             text = response.text.strip()
 
             if text.startswith('```json'):
@@ -162,10 +180,13 @@ No markdown, no explanation."""
             if text.endswith('```'):
                 text = text[:-3]
 
-            return json.loads(text.strip())
+            result = json.loads(text.strip())
+            self._release_model()
+            return result
 
         except Exception as e:
             print(f"Suggestion error: {e}")
+            self._release_model()
             return {
                 'competitors': [],
                 'keywords': [],
