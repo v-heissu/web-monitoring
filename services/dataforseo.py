@@ -64,13 +64,15 @@ class DataForSEOClient:
         combined_query = " OR ".join([f'"{kw}"' for kw in keywords])
 
         date_from = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        date_to = datetime.now().strftime("%Y-%m-%d")
 
         payload = [{
             "keyword": combined_query,
             "location_code": location_map.get(market, 2380),
             "language_code": language_map.get(market, 'it'),
             "depth": max_results,
-            "date_from": date_from
+            "date_from": date_from,
+            "date_to": date_to
         }]
 
         try:
