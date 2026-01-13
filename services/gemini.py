@@ -1,10 +1,11 @@
 """
 Gemini AI Analysis Service
 Handles sentiment, topic extraction, and suggestions
+Memory-optimized for Railway workers
 """
 
 import google.generativeai as genai
-from typing import List, Dict
+from typing import List, Dict, Callable, Optional
 import os
 import json
 import gc
@@ -19,7 +20,7 @@ class GeminiAnalyzer:
 
         genai.configure(api_key=api_key)
         self._model_name = 'gemini-2.0-flash-exp'
-        # Don't hold model in memory - create per batch
+        # Don't hold model in memory - create per call
         self.model = None
 
     def _get_model(self):
@@ -33,97 +34,113 @@ class GeminiAnalyzer:
         self.model = None
         gc.collect()
 
+    def analyze_single_article(self, article: Dict, brand: str) -> Dict:
+        """
+        Analyze a single article - memory efficient version
+        """
+        prompt = f"""Analyze this news article for brand "{brand}".
+
+Return JSON with:
+- sentiment: "positive", "negative", or "neutral"
+- sentiment_score: float -1.0 to +1.0
+- topics: array of 2-3 topics
+- entities: {{"people": [], "organizations": [], "locations": []}}
+- summary: 1 sentence summary in Italian
+- relevance_score: 0-100
+
+Article:
+Title: {article.get('title', '')[:200]}
+Snippet: {article.get('snippet', '')[:300]}
+
+Return ONLY valid JSON, no markdown."""
+
+        try:
+            model = self._get_model()
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    'temperature': 0.3,
+                    'top_p': 0.8,
+                    'max_output_tokens': 500  # Minimal for single article
+                }
+            )
+
+            text = response.text.strip()
+            if text.startswith('```json'):
+                text = text[7:]
+            if text.startswith('```'):
+                text = text[3:]
+            if text.endswith('```'):
+                text = text[:-3]
+            text = text.strip()
+
+            result = json.loads(text)
+
+            analyzed = {
+                **article,
+                'sentiment': result.get('sentiment', 'neutral'),
+                'sentiment_score': float(result.get('sentiment_score', 0)),
+                'topics': result.get('topics', []),
+                'entities': result.get('entities', {}),
+                'summary': result.get('summary', article.get('snippet', '')[:200]),
+                'relevance_score': float(result.get('relevance_score', 50))
+            }
+
+            # Cleanup
+            del response, text, result
+            return analyzed
+
+        except Exception as e:
+            print(f"Gemini single analysis error: {e}")
+            return {
+                **article,
+                'sentiment': 'neutral',
+                'sentiment_score': 0.0,
+                'topics': [],
+                'entities': {},
+                'summary': article.get('snippet', '')[:200],
+                'relevance_score': 50.0
+            }
+
     def batch_analyze_articles(
         self,
         articles: List[Dict],
         brand: str,
-        batch_size: int = 3  # Reduced from 5 for Railway memory limits
+        batch_size: int = 1,  # Process one at a time for memory safety
+        progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> List[Dict]:
         """
-        Batch analyze articles for sentiment, topics, entities
+        Analyze articles one by one for memory safety
 
         Args:
             articles: List of articles with title + snippet
             brand: Brand name for context
-            batch_size: Articles per API call
+            batch_size: Ignored, always processes one at a time
+            progress_callback: Optional callback(current, total) for progress
 
         Returns:
             Analyzed articles with AI fields added
         """
         analyzed = []
+        total = len(articles)
 
-        for i in range(0, len(articles), batch_size):
-            batch = articles[i:i+batch_size]
+        # Force garbage collection before starting
+        gc.collect()
 
-            prompt = f"""Analyze these news articles for brand monitoring of "{brand}".
+        for i, article in enumerate(articles):
+            # Progress callback
+            if progress_callback:
+                progress_callback(i + 1, total)
 
-For EACH article, return a JSON object with:
-- sentiment: "positive", "negative", or "neutral"
-- sentiment_score: float from -1.0 (very negative) to +1.0 (very positive)
-- topics: array of 2-3 main topics/themes
-- entities: object with arrays: {{"people": [], "organizations": [], "locations": []}}
-- summary: 1-2 sentence summary in Italian
-- relevance_score: 0-100 indicating relevance to {brand}
+            # Analyze single article
+            result = self.analyze_single_article(article, brand)
+            analyzed.append(result)
 
-Articles to analyze:
-{json.dumps([{'id': idx, 'title': a.get('title', ''), 'snippet': a.get('snippet', '')} for idx, a in enumerate(batch)], ensure_ascii=False, indent=2)}
-
-Return ONLY a valid JSON array with {len(batch)} objects, no markdown, no explanation."""
-
-            try:
-                model = self._get_model()
-                response = model.generate_content(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.3,
-                        'top_p': 0.8,
-                        'max_output_tokens': 2000  # Reduced from 8000 for memory
-                    }
-                )
-
-                # Clean response
-                text = response.text.strip()
-                if text.startswith('```json'):
-                    text = text[7:]
-                if text.endswith('```'):
-                    text = text[:-3]
-                text = text.strip()
-
-                results = json.loads(text)
-
-                # Merge with original articles
-                for idx, result in enumerate(results):
-                    if idx < len(batch):
-                        analyzed.append({
-                            **batch[idx],
-                            'sentiment': result.get('sentiment', 'neutral'),
-                            'sentiment_score': float(result.get('sentiment_score', 0)),
-                            'topics': result.get('topics', []),
-                            'entities': result.get('entities', {}),
-                            'summary': result.get('summary', batch[idx].get('snippet', '')[:200]),
-                            'relevance_score': float(result.get('relevance_score', 50))
-                        })
-
-                # Explicit cleanup of response objects
-                del response, text, results
-
-            except Exception as e:
-                print(f"Gemini analysis error: {e}")
-                # Fallback: neutral analysis
-                for article in batch:
-                    analyzed.append({
-                        **article,
-                        'sentiment': 'neutral',
-                        'sentiment_score': 0.0,
-                        'topics': [],
-                        'entities': {},
-                        'summary': article.get('snippet', '')[:200],
-                        'relevance_score': 50.0
-                    })
-
-            # Memory management: release model and collect garbage after each batch
+            # Release model and collect garbage after EVERY article
             self._release_model()
-            time.sleep(0.5)  # Small delay to avoid rate limiting
+
+            # Small delay to avoid rate limiting
+            time.sleep(0.3)
 
         return analyzed
 

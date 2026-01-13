@@ -53,6 +53,11 @@ celery_app.conf.beat_schedule = {
         'task': 'worker.scrape_all_active_projects',
         'schedule': crontab(minute=0, hour='*/6'),
     },
+    'cleanup-stuck-jobs-hourly': {
+        'task': 'worker.cleanup_stuck_jobs',
+        'schedule': crontab(minute=30, hour='*'),  # Every hour at :30
+        'args': (2,),  # Jobs older than 2 hours
+    },
 }
 
 # Task logger
@@ -181,8 +186,12 @@ def scrape_project(self, project_id: int):
         # Check Gemini credentials
         gemini_key = os.getenv("GEMINI_API_KEY")
 
-        # Memory optimization: limit articles for AI analysis
-        MAX_GEMINI_ARTICLES = 30  # Reduced for Railway memory limits
+        # Memory optimization: strict limits for Railway 512MB workers
+        MAX_GEMINI_ARTICLES = 15  # Process only 15 articles with AI
+        import gc
+
+        # Force garbage collection before AI analysis
+        gc.collect()
 
         if not gemini_key:
             log(f"[{project_id}] WARNING: GEMINI_API_KEY not set - skipping AI analysis", 'warning')
@@ -199,19 +208,26 @@ def scrape_project(self, project_id: int):
                     'relevance_score': 50.0
                 })
         else:
-            import gc
-
-            # Split: AI analysis for recent articles, default for rest
+            # Split: AI analysis for most recent articles, default for rest
             articles_for_ai = articles[:MAX_GEMINI_ARTICLES]
             articles_default = articles[MAX_GEMINI_ARTICLES:]
 
-            log(f"[{project_id}] Gemini API key found, analyzing {len(articles_for_ai)} articles (skipping {len(articles_default)} for memory)")
+            log(f"[{project_id}] Gemini: analyzing {len(articles_for_ai)} articles (1 at a time), {len(articles_default)} with default")
+
+            # Progress callback for logging
+            def progress_log(current, total):
+                if current == 1 or current == total or current % 5 == 0:
+                    log(f"[{project_id}] AI Progress: {current}/{total} articles")
 
             from services.gemini import GeminiAnalyzer
             gemini = GeminiAnalyzer()
-            analyzed = gemini.batch_analyze_articles(articles_for_ai, project['brand'])
+            analyzed = gemini.batch_analyze_articles(
+                articles_for_ai,
+                project['brand'],
+                progress_callback=progress_log
+            )
 
-            # Clean up Gemini analyzer
+            # Clean up Gemini analyzer aggressively
             del gemini
             gc.collect()
 
@@ -377,6 +393,59 @@ def scrape_all_active_projects():
             'success': True,
             'projects_scheduled': len(projects),
             'timestamp': datetime.now().isoformat()
+        }
+
+    finally:
+        cursor.close()
+        db.close()
+
+
+@celery_app.task(name='worker.cleanup_stuck_jobs')
+def cleanup_stuck_jobs(hours_old: int = 2):
+    """
+    Clean up jobs that have been stuck in 'running' state for too long.
+    These are likely OOM-killed workers that never completed.
+    """
+    log(f"=== CLEANUP START === Looking for jobs stuck > {hours_old} hours")
+
+    from utils.db import get_db_connection
+
+    db = get_db_connection()
+    cursor = db.cursor()
+
+    try:
+        # Find and mark stuck jobs as failed
+        cursor.execute("""
+            UPDATE scraping_jobs
+            SET status = 'failed',
+                completed_at = NOW(),
+                error_message = 'Job timed out - worker likely OOM killed'
+            WHERE status = 'running'
+              AND started_at < NOW() - INTERVAL '%s hours'
+            RETURNING id, project_id, started_at
+        """, (hours_old,))
+
+        stuck_jobs = cursor.fetchall()
+        db.commit()
+
+        if stuck_jobs:
+            for job in stuck_jobs:
+                log(f"Marked job {job['id']} (project {job['project_id']}) as failed - started at {job['started_at']}")
+            log(f"=== CLEANUP COMPLETE === Cleaned up {len(stuck_jobs)} stuck jobs")
+        else:
+            log("=== CLEANUP COMPLETE === No stuck jobs found")
+
+        return {
+            'success': True,
+            'cleaned_up': len(stuck_jobs),
+            'timestamp': datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        log(f"Cleanup error: {e}", 'error')
+        return {
+            'success': False,
+            'error': str(e)
         }
 
     finally:
