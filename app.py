@@ -636,11 +636,12 @@ else:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Dashboard",
         "Articoli",
         "Configurazione",
-        "Alert"
+        "Alert",
+        "Scraping Jobs"
     ])
 
     # =============================================================================
@@ -1071,6 +1072,116 @@ else:
                         db.commit()
                         st.success("Alert creato!")
                         st.rerun()
+
+    # =============================================================================
+    # TAB 5: SCRAPING JOBS
+    # =============================================================================
+    with tab5:
+        st.markdown('<p class="section-header">Scraping Jobs</p>', unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns([1, 1, 4])
+
+        with col1:
+            if st.button("Avvia Scraping", type="primary", use_container_width=True):
+                try:
+                    task = scrape_project.delay(project_id)
+                    st.success(f"Task avviato: {task.id}")
+                except Exception as e:
+                    st.error(f"Errore avvio task: {e}")
+
+        with col2:
+            if st.button("Test Celery", use_container_width=True):
+                try:
+                    from worker import test_task
+                    result = test_task.delay()
+                    st.info(f"Test task inviato: {result.id}")
+                    # Wait a bit for result
+                    import time
+                    time.sleep(2)
+                    if result.ready():
+                        st.success(f"Celery OK! {result.result}")
+                    else:
+                        st.warning("Task in attesa... controlla i log del worker")
+                except Exception as e:
+                    st.error(f"Errore connessione Celery/Redis: {e}")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Recent jobs table
+        cursor.execute("""
+            SELECT
+                id,
+                status,
+                started_at,
+                completed_at,
+                articles_found,
+                new_articles,
+                error_message,
+                celery_task_id
+            FROM scraping_jobs
+            WHERE project_id = %s
+            ORDER BY created_at DESC
+            LIMIT 20
+        """, (project_id,))
+        jobs = cursor.fetchall()
+
+        if not jobs:
+            st.info("Nessun job di scraping eseguito. Clicca 'Avvia Scraping' per iniziare.")
+        else:
+            for job in jobs:
+                status_color = {
+                    'running': '#F39C12',
+                    'completed': '#27AE60',
+                    'failed': '#E74C3C'
+                }.get(job['status'], '#888')
+
+                status_icon = {
+                    'running': '...',
+                    'completed': 'OK',
+                    'failed': 'ERR'
+                }.get(job['status'], '?')
+
+                with st.expander(
+                    f"[{status_icon}] Job #{job['id']} - {job['started_at'].strftime('%d/%m %H:%M') if job['started_at'] else 'N/A'}",
+                    expanded=(job['status'] == 'running')
+                ):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown(f"**Status:** <span style='color: {status_color}'>{job['status'].upper()}</span>", unsafe_allow_html=True)
+                        st.markdown(f"**Avviato:** {job['started_at']}")
+                        st.markdown(f"**Completato:** {job['completed_at'] or 'In corso...'}")
+
+                    with col2:
+                        st.markdown(f"**Articoli trovati:** {job['articles_found'] or 0}")
+                        st.markdown(f"**Nuovi articoli:** {job['new_articles'] or 0}")
+                        if job['celery_task_id']:
+                            st.markdown(f"**Task ID:** `{job['celery_task_id'][:16]}...`")
+
+                    if job['error_message']:
+                        st.error(f"**Errore:** {job['error_message']}")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Environment check
+        st.markdown('<p class="section-header">Diagnostica</p>', unsafe_allow_html=True)
+
+        import os
+        env_vars = {
+            'DATABASE_URL': bool(os.getenv('DATABASE_URL')),
+            'REDIS_URL': bool(os.getenv('REDIS_URL')),
+            'DATAFORSEO_LOGIN': bool(os.getenv('DATAFORSEO_LOGIN')),
+            'DATAFORSEO_PASSWORD': bool(os.getenv('DATAFORSEO_PASSWORD')),
+            'GEMINI_API_KEY': bool(os.getenv('GEMINI_API_KEY')),
+        }
+
+        for var, configured in env_vars.items():
+            icon = "OK" if configured else "MANCA"
+            color = "#27AE60" if configured else "#E74C3C"
+            st.markdown(f"<span style='color: {color}'>**[{icon}]**</span> {var}", unsafe_allow_html=True)
+
+        if not all(env_vars.values()):
+            st.warning("Alcune variabili d'ambiente non sono configurate. Lo scraping potrebbe fallire.")
 
 # =============================================================================
 # SIDEBAR FOOTER
