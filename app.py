@@ -727,8 +727,8 @@ else:
                 fillcolor='rgba(107, 26, 199, 0.1)'
             ))
             fig_timeline.update_layout(
-                title='Menzioni Giornaliere (30 giorni)',
                 **PLOTLY_LAYOUT,
+                title={'text': 'Menzioni Giornaliere (30 giorni)', 'font': {'color': 'white', 'size': 16}},
                 height=350,
                 showlegend=False
             )
