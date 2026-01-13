@@ -78,7 +78,7 @@ class DataForSEOClient:
                 f"{self.base_url}/serp/google/news/live/advanced",
                 json=payload,
                 auth=(self.login, self.password),
-                timeout=30
+                timeout=60
             )
 
             response.raise_for_status()
@@ -86,16 +86,28 @@ class DataForSEOClient:
 
             articles = []
 
-            # Parse response
-            for task in data.get('tasks', []):
-                for result in task.get('result', []):
-                    for item in result.get('items', []):
+            # Parse response - handle None values
+            tasks = data.get('tasks') or []
+            for task in tasks:
+                # Check for API errors
+                if task.get('status_code') != 20000:
+                    error_msg = task.get('status_message', 'Unknown API error')
+                    print(f"[DataForSEO] Task error: {error_msg}")
+                    continue
+
+                results = task.get('result') or []
+                for result in results:
+                    items = result.get('items') or []
+                    for item in items:
+                        # Skip non-news items
+                        if not item.get('url'):
+                            continue
                         articles.append({
                             'url': item.get('url'),
                             'title': item.get('title'),
                             'source': item.get('source'),
                             'published_at': item.get('date'),
-                            'snippet': item.get('snippet', ''),
+                            'snippet': item.get('snippet') or '',
                             'type': item.get('type', 'news')
                         })
 
