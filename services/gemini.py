@@ -7,6 +7,8 @@ import google.generativeai as genai
 from typing import List, Dict
 import os
 import json
+import gc
+import time
 
 
 class GeminiAnalyzer:
@@ -22,7 +24,7 @@ class GeminiAnalyzer:
         self,
         articles: List[Dict],
         brand: str,
-        batch_size: int = 20
+        batch_size: int = 5  # Reduced for Railway memory limits
     ) -> List[Dict]:
         """
         Batch analyze articles for sentiment, topics, entities
@@ -101,6 +103,10 @@ Return ONLY a valid JSON array with {len(batch)} objects, no markdown, no explan
                         'summary': article.get('snippet', '')[:200],
                         'relevance_score': 50.0
                     })
+
+            # Memory management: free memory after each batch
+            gc.collect()
+            time.sleep(0.5)  # Small delay to avoid rate limiting
 
         return analyzed
 

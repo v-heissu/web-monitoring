@@ -147,7 +147,7 @@ def scrape_project(self, project_id: int):
             keywords=all_terms,
             market=project['market'],
             days_back=7,
-            max_results=100
+            max_results=50  # Reduced from 100 for Railway memory limits
         )
 
         if not scrape_result['success']:
