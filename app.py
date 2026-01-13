@@ -727,8 +727,20 @@ else:
                 fillcolor='rgba(107, 26, 199, 0.1)'
             ))
             fig_timeline.update_layout(
-                **PLOTLY_LAYOUT,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font={'color': 'rgba(255,255,255,0.8)', 'family': 'Inter, sans-serif'},
                 title={'text': 'Menzioni Giornaliere (30 giorni)', 'font': {'color': 'white', 'size': 16}},
+                xaxis={
+                    'gridcolor': 'rgba(255,255,255,0.1)',
+                    'linecolor': 'rgba(255,255,255,0.2)',
+                    'tickcolor': 'rgba(255,255,255,0.5)'
+                },
+                yaxis={
+                    'gridcolor': 'rgba(255,255,255,0.1)',
+                    'linecolor': 'rgba(255,255,255,0.2)',
+                    'tickcolor': 'rgba(255,255,255,0.5)'
+                },
                 height=350,
                 showlegend=False
             )
