@@ -180,6 +180,10 @@ def scrape_project(self, project_id: int):
 
         # Check Gemini credentials
         gemini_key = os.getenv("GEMINI_API_KEY")
+
+        # Memory optimization: limit articles for AI analysis
+        MAX_GEMINI_ARTICLES = 30  # Reduced for Railway memory limits
+
         if not gemini_key:
             log(f"[{project_id}] WARNING: GEMINI_API_KEY not set - skipping AI analysis", 'warning')
             # Provide default analysis
@@ -195,11 +199,38 @@ def scrape_project(self, project_id: int):
                     'relevance_score': 50.0
                 })
         else:
-            log(f"[{project_id}] Gemini API key found, starting AI analysis...")
+            import gc
+
+            # Split: AI analysis for recent articles, default for rest
+            articles_for_ai = articles[:MAX_GEMINI_ARTICLES]
+            articles_default = articles[MAX_GEMINI_ARTICLES:]
+
+            log(f"[{project_id}] Gemini API key found, analyzing {len(articles_for_ai)} articles (skipping {len(articles_default)} for memory)")
+
             from services.gemini import GeminiAnalyzer
             gemini = GeminiAnalyzer()
-            analyzed = gemini.batch_analyze_articles(articles, project['brand'])
+            analyzed = gemini.batch_analyze_articles(articles_for_ai, project['brand'])
+
+            # Clean up Gemini analyzer
+            del gemini
+            gc.collect()
+
             log(f"[{project_id}] Gemini analysis completed for {len(analyzed)} articles")
+
+            # Add default analysis for remaining articles
+            for a in articles_default:
+                analyzed.append({
+                    **a,
+                    'sentiment': 'neutral',
+                    'sentiment_score': 0.0,
+                    'topics': [],
+                    'entities': {},
+                    'summary': (a.get('snippet') or '')[:200],
+                    'relevance_score': 50.0
+                })
+
+            if articles_default:
+                log(f"[{project_id}] Added {len(articles_default)} articles with default analysis")
 
         # Save articles
         new_articles = 0
