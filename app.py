@@ -688,10 +688,11 @@ else:
             ORDER BY count DESC LIMIT 1
         """, (project_id,))
         top_source_row = cursor.fetchone()
-        top_source = top_source_row['source'] if top_source_row else "N/A"
+        top_source = (top_source_row['source'] if top_source_row and top_source_row['source'] else "N/A") or "N/A"
 
         with col3:
-            st.metric("Top Fonte", top_source[:20] + "..." if len(top_source) > 20 else top_source)
+            display_source = top_source[:20] + "..." if top_source and len(top_source) > 20 else (top_source or "N/A")
+            st.metric("Top Fonte", display_source)
 
         cursor.execute("""
             SELECT COUNT(*) as count FROM alerts
