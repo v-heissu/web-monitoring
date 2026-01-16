@@ -900,6 +900,12 @@ else:
         for article in articles:
             sentiment_class = f"sentiment-{article['sentiment']}" if article['sentiment'] else "sentiment-neutral"
 
+            # Safe formatting for potentially None values
+            relevance = float(article['relevance_score'] or 0)
+            sent_score = float(article['sentiment_score'] or 0)
+            summary_text = article['summary'] or ''
+            summary_display = (summary_text[:300] + '...') if len(summary_text) > 300 else (summary_text or 'Nessun summary disponibile')
+
             st.markdown(f"""
             <div class="article-card">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -908,17 +914,17 @@ else:
                         <p style="color: rgba(255,255,255,0.6); font-size: 0.875rem; margin: 0 0 0.75rem 0;">
                             <strong>{article['source'] or 'Fonte sconosciuta'}</strong> |
                             {article['published_at'] or 'Data N/A'} |
-                            Rilevanza: {article['relevance_score']:.0f if article['relevance_score'] else 0}/100
+                            Rilevanza: {relevance:.0f}/100
                         </p>
                         <p style="color: rgba(255,255,255,0.8); margin: 0 0 0.75rem 0;">
-                            {article['summary'][:300] + '...' if article['summary'] and len(article['summary']) > 300 else article['summary'] or 'Nessun summary disponibile'}
+                            {summary_display}
                         </p>
                         <a href="{article['url']}" target="_blank" style="color: #E8732A;">Leggi articolo completo →</a>
                     </div>
                     <div style="margin-left: 1rem;">
                         <span class="sentiment-badge {sentiment_class}">
                             {article['sentiment'].upper() if article['sentiment'] else 'N/A'}<br/>
-                            {article['sentiment_score']:+.2f if article['sentiment_score'] else '0.00'}
+                            {sent_score:+.2f}
                         </span>
                     </div>
                 </div>
